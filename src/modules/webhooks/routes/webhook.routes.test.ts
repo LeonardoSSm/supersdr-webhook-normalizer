@@ -72,6 +72,7 @@ const zapiPayload = {
 function createMessageRepositoryMock() {
   return {
     save: vi.fn().mockResolvedValue(undefined),
+    findMany: vi.fn().mockResolvedValue([]),
   } satisfies MessagePersistence;
 }
 
@@ -90,6 +91,29 @@ async function postWebhook(
       },
       payload: JSON.stringify(payload),
     });
+
+    return { response, messageRepository };
+  } finally {
+    await app.close();
+  }
+}
+
+async function getMessages(
+  query: { provider?: string; fromPhone?: string; limit?: number } = {},
+  messageRepository = createMessageRepositoryMock()
+) {
+  const app = buildApp({ messageRepository });
+
+  try {
+    const params = new URLSearchParams();
+    if (query.provider !== undefined) params.set("provider", query.provider);
+    if (query.fromPhone !== undefined) params.set("fromPhone", query.fromPhone);
+    if (query.limit !== undefined) params.set("limit", String(query.limit));
+
+    const qs = params.toString();
+    const url = qs ? `/messages?${qs}` : "/messages";
+
+    const response = await app.inject({ method: "GET", url });
 
     return { response, messageRepository };
   } finally {
@@ -123,7 +147,8 @@ describe("POST /webhooks", () => {
         provider: "meta",
         providerMessageId: "wamid.message-id",
         timestamp: new Date(1677234567 * 1000),
-      })
+      }),
+      undefined
     );
   });
 
@@ -136,7 +161,8 @@ describe("POST /webhooks", () => {
         provider: "evolution",
         providerMessageId: "3EB0B430B6F8C1D073A0",
         fromPhone: "5511988888888",
-      })
+      }),
+      undefined
     );
   });
 
@@ -149,7 +175,8 @@ describe("POST /webhooks", () => {
         provider: "zapi",
         providerMessageId: "3EB0B430B6F8C1D073A0",
         fromPhone: "5511988888888",
-      })
+      }),
+      undefined
     );
   });
 
@@ -184,6 +211,7 @@ describe("POST /webhooks", () => {
   it("returns INTERNAL_SERVER_ERROR when persistence fails unexpectedly", async () => {
     const messageRepository = {
       save: vi.fn().mockRejectedValue(new Error("Database unavailable")),
+      findMany: vi.fn().mockResolvedValue([]),
     } satisfies MessagePersistence;
 
     const { response } = await postWebhook(metaPayload, messageRepository);
@@ -196,5 +224,69 @@ describe("POST /webhooks", () => {
       message: "Unexpected error while processing webhook",
     });
     expect(messageRepository.save).toHaveBeenCalledOnce();
+  });
+});
+
+describe("GET /messages", () => {
+  it("returns an empty list when there are no messages", async () => {
+    const { response } = await getMessages();
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toEqual({ success: true, data: [], total: 0 });
+  });
+
+  it("passes provider filter to the repository and returns filtered messages", async () => {
+    const mockMessage = {
+      id: "clxxx1",
+      provider: "meta",
+      providerMessageId: "wamid.123",
+      instanceId: null,
+      fromPhone: "5511988888888",
+      toPhone: null,
+      contactName: "Joao",
+      direction: "inbound",
+      messageType: "text",
+      text: "Hello",
+      timestamp: new Date("2023-02-24T12:00:00.000Z"),
+      rawPayload: {},
+      intent: null,
+      intentScore: null,
+      intentModel: null,
+      createdAt: new Date("2023-02-24T12:00:00.000Z"),
+      updatedAt: new Date("2023-02-24T12:00:00.000Z"),
+    };
+
+    const messageRepository = {
+      save: vi.fn().mockResolvedValue(undefined),
+      findMany: vi.fn().mockResolvedValue([mockMessage]),
+    } satisfies MessagePersistence;
+
+    const { response } = await getMessages({ provider: "meta" }, messageRepository);
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.total).toBe(1);
+    expect(messageRepository.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "meta" })
+    );
+  });
+
+  it("returns 500 when the repository throws", async () => {
+    const messageRepository = {
+      save: vi.fn().mockResolvedValue(undefined),
+      findMany: vi.fn().mockRejectedValue(new Error("DB connection lost")),
+    } satisfies MessagePersistence;
+
+    const { response } = await getMessages({}, messageRepository);
+    const body = response.json();
+
+    expect(response.statusCode).toBe(500);
+    expect(body).toEqual({
+      success: false,
+      error: "INTERNAL_SERVER_ERROR",
+      message: "Unexpected error while fetching messages",
+    });
   });
 });

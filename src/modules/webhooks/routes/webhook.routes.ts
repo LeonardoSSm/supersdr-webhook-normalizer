@@ -22,12 +22,23 @@ export interface MessagePersistence {
     normalizedMessage: NormalizedMessage,
     intentData?: MessageIntent
   ): Promise<unknown>;
+  findMany(params: {
+    provider?: string;
+    fromPhone?: string;
+    limit?: number;
+  }): Promise<unknown[]>;
 }
 
 export interface WebhookRoutesOptions {
   normalizerService?: Pick<WebhookNormalizerService, "normalize">;
   messageRepository?: MessagePersistence;
   llmClassifier?: LlmClassifierService;
+}
+
+interface GetMessagesQuerystring {
+  provider?: string;
+  fromPhone?: string;
+  limit?: string;
 }
 
 export const webhookRoutes: FastifyPluginAsync<WebhookRoutesOptions> = async (
@@ -90,4 +101,37 @@ export const webhookRoutes: FastifyPluginAsync<WebhookRoutesOptions> = async (
       });
     }
   });
+
+  app.get<{ Querystring: GetMessagesQuerystring }>(
+    "/messages",
+    async (request, reply) => {
+      try {
+        const { provider, fromPhone } = request.query;
+        const limit =
+          request.query.limit !== undefined
+            ? Number(request.query.limit)
+            : 20;
+
+        const messages = await messageRepository.findMany({
+          provider,
+          fromPhone,
+          limit,
+        });
+
+        return reply.code(200).send({
+          success: true,
+          data: messages,
+          total: messages.length,
+        });
+      } catch (error) {
+        request.log.error({ error }, "Failed to fetch messages");
+
+        return reply.code(500).send({
+          success: false,
+          error: "INTERNAL_SERVER_ERROR",
+          message: "Unexpected error while fetching messages",
+        });
+      }
+    }
+  );
 };

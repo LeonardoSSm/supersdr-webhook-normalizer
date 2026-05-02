@@ -3,8 +3,31 @@ import { Prisma, type Message, type PrismaClient } from "@prisma/client";
 import type { NormalizedMessage } from "../dtos/normalized-message";
 import type { MessageIntent } from "../services/llm-classifier.service";
 
+export type FindManyParams = {
+  provider?: string;
+  fromPhone?: string;
+  limit?: number;
+};
+
 export class MessageRepository {
   constructor(private readonly prisma: PrismaClient) {}
+
+  async findMany({
+    provider,
+    fromPhone,
+    limit = 20,
+  }: FindManyParams): Promise<Message[]> {
+    const take = Math.min(limit, 100);
+
+    return this.prisma.message.findMany({
+      where: {
+        ...(provider !== undefined && { provider }),
+        ...(fromPhone !== undefined && { fromPhone }),
+      },
+      orderBy: { timestamp: "desc" },
+      take,
+    });
+  }
 
   async save(
     normalizedMessage: NormalizedMessage,

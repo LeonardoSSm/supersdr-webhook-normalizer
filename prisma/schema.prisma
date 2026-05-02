@@ -20,6 +20,9 @@ model Message {
   text              String?
   timestamp         DateTime
   rawPayload        Json
+  intent            String?
+  intentScore       Float?
+  intentModel       String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

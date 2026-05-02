@@ -1,12 +1,16 @@
 import { Prisma, type Message, type PrismaClient } from "@prisma/client";
 
 import type { NormalizedMessage } from "../dtos/normalized-message";
+import type { MessageIntent } from "../services/llm-classifier.service";
 
 export class MessageRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async save(normalizedMessage: NormalizedMessage): Promise<Message> {
-    const data = this.toMessageData(normalizedMessage);
+  async save(
+    normalizedMessage: NormalizedMessage,
+    intentData?: MessageIntent
+  ): Promise<Message> {
+    const data = this.toMessageData(normalizedMessage, intentData);
 
     return this.prisma.message.upsert({
       where: {
@@ -21,7 +25,8 @@ export class MessageRepository {
   }
 
   private toMessageData(
-    normalizedMessage: NormalizedMessage
+    normalizedMessage: NormalizedMessage,
+    intentData?: MessageIntent
   ): Prisma.MessageCreateInput {
     return {
       provider: normalizedMessage.provider,
@@ -35,6 +40,9 @@ export class MessageRepository {
       text: normalizedMessage.text,
       timestamp: normalizedMessage.timestamp,
       rawPayload: this.toJsonValue(normalizedMessage.rawPayload),
+      intent: intentData?.intent,
+      intentScore: intentData?.score,
+      intentModel: intentData?.model,
     };
   }
 

@@ -1,5 +1,11 @@
+import OpenAI from "openai";
 import Fastify from "fastify";
 
+import { env } from "./config/env";
+import {
+  NoOpLlmClassifierService,
+  OpenAiLlmClassifierService,
+} from "./modules/webhooks/services/llm-classifier.service";
 import {
   webhookRoutes,
   type WebhookRoutesOptions,
@@ -20,4 +26,14 @@ export function buildApp(options: BuildAppOptions = {}) {
   });
 
   return app;
+}
+
+export function createLlmClassifier() {
+  if (env.OPENAI_API_KEY) {
+    return new OpenAiLlmClassifierService(
+      new OpenAI({ apiKey: env.OPENAI_API_KEY })
+    );
+  }
+
+  return new NoOpLlmClassifierService();
 }

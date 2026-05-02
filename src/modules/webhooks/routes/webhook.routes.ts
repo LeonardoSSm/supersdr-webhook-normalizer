@@ -7,6 +7,10 @@ import {
   WebhookProcessingError,
 } from "../errors/webhook-errors";
 import { MessageRepository } from "../repositories/message.repository";
+import type {
+  LlmClassifierService,
+  MessageIntent,
+} from "../services/llm-classifier.service";
 import {
   createDefaultWebhookNormalizerService,
   type WebhookNormalizerService,
@@ -14,12 +18,16 @@ import {
 import { prisma } from "../../../shared/database/prisma";
 
 export interface MessagePersistence {
-  save(normalizedMessage: NormalizedMessage): Promise<unknown>;
+  save(
+    normalizedMessage: NormalizedMessage,
+    intentData?: MessageIntent
+  ): Promise<unknown>;
 }
 
 export interface WebhookRoutesOptions {
   normalizerService?: Pick<WebhookNormalizerService, "normalize">;
   messageRepository?: MessagePersistence;
+  llmClassifier?: LlmClassifierService;
 }
 
 export const webhookRoutes: FastifyPluginAsync<WebhookRoutesOptions> = async (
@@ -27,17 +35,26 @@ export const webhookRoutes: FastifyPluginAsync<WebhookRoutesOptions> = async (
   options
 ) => {
   const service = options.normalizerService ?? createDefaultWebhookNormalizerService();
-  const messageRepository =
+  const messageRepository: MessagePersistence =
     options.messageRepository ?? new MessageRepository(prisma);
+  const llmClassifier = options.llmClassifier;
 
   app.post("/webhooks", async (request, reply) => {
     try {
       const normalizedMessage = service.normalize(request.body);
-      await messageRepository.save(normalizedMessage);
+
+      const intentData = llmClassifier
+        ? await llmClassifier.classify(normalizedMessage)
+        : undefined;
+
+      await messageRepository.save(normalizedMessage, intentData);
 
       return reply.code(200).send({
         success: true,
-        data: normalizedMessage,
+        data: {
+          ...normalizedMessage,
+          ...(intentData && { intent: intentData }),
+        },
       });
     } catch (error) {
       request.log.error({ error }, "Failed to process webhook");

@@ -1,7 +1,7 @@
-import { buildApp } from "./app";
+import { buildApp, createLlmClassifier } from "./app";
 import { env } from "./config/env";
 
-const app = buildApp();
+const app = buildApp({ llmClassifier: createLlmClassifier() });
 
 async function start() {
   try {

@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "../../../app";
+import type { MessagePersistence } from "./webhook.routes";
 
 const metaPayload = {
   object: "whatsapp_business_account",
@@ -68,11 +69,20 @@ const zapiPayload = {
   },
 };
 
-async function postWebhook(payload: object) {
-  const app = buildApp();
+function createMessageRepositoryMock() {
+  return {
+    save: vi.fn().mockResolvedValue(undefined),
+  } satisfies MessagePersistence;
+}
+
+async function postWebhook(
+  payload: object,
+  messageRepository = createMessageRepositoryMock()
+) {
+  const app = buildApp({ messageRepository });
 
   try {
-    return await app.inject({
+    const response = await app.inject({
       method: "POST",
       url: "/webhooks",
       headers: {
@@ -80,14 +90,16 @@ async function postWebhook(payload: object) {
       },
       payload: JSON.stringify(payload),
     });
+
+    return { response, messageRepository };
   } finally {
     await app.close();
   }
 }
 
 describe("POST /webhooks", () => {
-  it("normalizes a valid Meta payload", async () => {
-    const response = await postWebhook(metaPayload);
+  it("normalizes and persists a valid Meta payload", async () => {
+    const { response, messageRepository } = await postWebhook(metaPayload);
     const body = response.json();
 
     expect(response.statusCode).toBe(200);
@@ -106,53 +118,43 @@ describe("POST /webhooks", () => {
         timestamp: new Date(1677234567 * 1000).toISOString(),
       },
     });
+    expect(messageRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "meta",
+        providerMessageId: "wamid.message-id",
+        timestamp: new Date(1677234567 * 1000),
+      })
+    );
   });
 
-  it("normalizes a valid Evolution payload", async () => {
-    const response = await postWebhook(evolutionPayload);
-    const body = response.json();
+  it("normalizes and persists a valid Evolution payload", async () => {
+    const { response, messageRepository } = await postWebhook(evolutionPayload);
 
     expect(response.statusCode).toBe(200);
-    expect(body).toMatchObject({
-      success: true,
-      data: {
+    expect(messageRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
         provider: "evolution",
         providerMessageId: "3EB0B430B6F8C1D073A0",
-        instanceId: "minha-instancia",
         fromPhone: "5511988888888",
-        toPhone: "5511999999999",
-        contactName: "Joao Silva",
-        direction: "inbound",
-        messageType: "text",
-        text: "Ola, gostaria de saber mais sobre o produto",
-        timestamp: new Date(1677234567 * 1000).toISOString(),
-      },
-    });
+      })
+    );
   });
 
-  it("normalizes a valid Z-API payload", async () => {
-    const response = await postWebhook(zapiPayload);
-    const body = response.json();
+  it("normalizes and persists a valid Z-API payload", async () => {
+    const { response, messageRepository } = await postWebhook(zapiPayload);
 
     expect(response.statusCode).toBe(200);
-    expect(body).toMatchObject({
-      success: true,
-      data: {
+    expect(messageRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
         provider: "zapi",
         providerMessageId: "3EB0B430B6F8C1D073A0",
-        instanceId: "SUA_INSTANCE_ID",
         fromPhone: "5511988888888",
-        contactName: "Joao Silva",
-        direction: "inbound",
-        messageType: "text",
-        text: "Ola, gostaria de saber mais sobre o produto",
-        timestamp: new Date(1677234567000).toISOString(),
-      },
-    });
+      })
+    );
   });
 
-  it("returns UNKNOWN_WEBHOOK_PROVIDER for unknown payloads", async () => {
-    const response = await postWebhook({ provider: "unknown" });
+  it("returns UNKNOWN_WEBHOOK_PROVIDER and does not persist unknown payloads", async () => {
+    const { response, messageRepository } = await postWebhook({ provider: "unknown" });
     const body = response.json();
 
     expect(response.statusCode).toBe(400);
@@ -161,10 +163,13 @@ describe("POST /webhooks", () => {
       error: "UNKNOWN_WEBHOOK_PROVIDER",
       message: "Unknown webhook provider",
     });
+    expect(messageRepository.save).not.toHaveBeenCalled();
   });
 
-  it("returns MALFORMED_WEBHOOK_PAYLOAD for malformed recognized payloads", async () => {
-    const response = await postWebhook({ object: "whatsapp_business_account" });
+  it("returns MALFORMED_WEBHOOK_PAYLOAD and does not persist malformed payloads", async () => {
+    const { response, messageRepository } = await postWebhook({
+      object: "whatsapp_business_account",
+    });
     const body = response.json();
 
     expect(response.statusCode).toBe(400);
@@ -173,5 +178,23 @@ describe("POST /webhooks", () => {
       error: "MALFORMED_WEBHOOK_PAYLOAD",
       message: "Malformed Meta webhook payload",
     });
+    expect(messageRepository.save).not.toHaveBeenCalled();
+  });
+
+  it("returns INTERNAL_SERVER_ERROR when persistence fails unexpectedly", async () => {
+    const messageRepository = {
+      save: vi.fn().mockRejectedValue(new Error("Database unavailable")),
+    } satisfies MessagePersistence;
+
+    const { response } = await postWebhook(metaPayload, messageRepository);
+    const body = response.json();
+
+    expect(response.statusCode).toBe(500);
+    expect(body).toEqual({
+      success: false,
+      error: "INTERNAL_SERVER_ERROR",
+      message: "Unexpected error while processing webhook",
+    });
+    expect(messageRepository.save).toHaveBeenCalledOnce();
   });
 });

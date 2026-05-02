@@ -1,18 +1,39 @@
 import type { FastifyPluginAsync } from "fastify";
 
+import type { NormalizedMessage } from "../dtos/normalized-message";
 import {
   MalformedWebhookPayloadError,
   UnknownWebhookProviderError,
   WebhookProcessingError,
 } from "../errors/webhook-errors";
-import { createDefaultWebhookNormalizerService } from "../services/webhook-normalizer.service";
+import { MessageRepository } from "../repositories/message.repository";
+import {
+  createDefaultWebhookNormalizerService,
+  type WebhookNormalizerService,
+} from "../services/webhook-normalizer.service";
+import { prisma } from "../../../shared/database/prisma";
 
-export const webhookRoutes: FastifyPluginAsync = async (app) => {
-  const service = createDefaultWebhookNormalizerService();
+export interface MessagePersistence {
+  save(normalizedMessage: NormalizedMessage): Promise<unknown>;
+}
+
+export interface WebhookRoutesOptions {
+  normalizerService?: Pick<WebhookNormalizerService, "normalize">;
+  messageRepository?: MessagePersistence;
+}
+
+export const webhookRoutes: FastifyPluginAsync<WebhookRoutesOptions> = async (
+  app,
+  options
+) => {
+  const service = options.normalizerService ?? createDefaultWebhookNormalizerService();
+  const messageRepository =
+    options.messageRepository ?? new MessageRepository(prisma);
 
   app.post("/webhooks", async (request, reply) => {
     try {
       const normalizedMessage = service.normalize(request.body);
+      await messageRepository.save(normalizedMessage);
 
       return reply.code(200).send({
         success: true,

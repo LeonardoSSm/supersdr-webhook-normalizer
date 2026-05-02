@@ -4,6 +4,11 @@ import type { NormalizedMessage } from "../dtos/normalized-message";
 import { MalformedWebhookPayloadError } from "../errors/webhook-errors";
 import type { WebhookProviderAdapter } from "./webhook-provider-adapter";
 
+const zapiWebhookProviderSchema = z.object({
+  instanceId: z.string().min(1),
+  messageId: z.string().min(1),
+});
+
 const zapiWebhookPayloadSchema = z.object({
   instanceId: z.string().min(1),
   messageId: z.string().min(1),
@@ -27,7 +32,7 @@ export class ZapiWebhookAdapter implements WebhookProviderAdapter {
   provider = "zapi" as const;
 
   canHandle(payload: unknown): boolean {
-    return zapiWebhookPayloadSchema.safeParse(payload).success;
+    return zapiWebhookProviderSchema.safeParse(payload).success;
   }
 
   normalize(payload: unknown): NormalizedMessage {

@@ -4,6 +4,10 @@ import type { NormalizedMessage } from "../dtos/normalized-message";
 import { MalformedWebhookPayloadError } from "../errors/webhook-errors";
 import type { WebhookProviderAdapter } from "./webhook-provider-adapter";
 
+const evolutionWebhookProviderSchema = z.object({
+  event: z.literal("messages.upsert"),
+});
+
 const evolutionWebhookPayloadSchema = z
   .object({
     event: z.literal("messages.upsert"),
@@ -42,7 +46,7 @@ export class EvolutionWebhookAdapter implements WebhookProviderAdapter {
   provider = "evolution" as const;
 
   canHandle(payload: unknown): boolean {
-    return evolutionWebhookPayloadSchema.safeParse(payload).success;
+    return evolutionWebhookProviderSchema.safeParse(payload).success;
   }
 
   normalize(payload: unknown): NormalizedMessage {

@@ -4,6 +4,10 @@ import type { NormalizedMessage } from "../dtos/normalized-message";
 import { MalformedWebhookPayloadError } from "../errors/webhook-errors";
 import type { WebhookProviderAdapter } from "./webhook-provider-adapter";
 
+const metaWebhookProviderSchema = z.object({
+  object: z.literal("whatsapp_business_account"),
+});
+
 const metaMessageSchema = z.object({
   from: z.string().min(1),
   id: z.string().min(1),
@@ -58,7 +62,7 @@ export class MetaWebhookAdapter implements WebhookProviderAdapter {
   provider = "meta" as const;
 
   canHandle(payload: unknown): boolean {
-    return metaWebhookPayloadSchema.safeParse(payload).success;
+    return metaWebhookProviderSchema.safeParse(payload).success;
   }
 
   normalize(payload: unknown): NormalizedMessage {
